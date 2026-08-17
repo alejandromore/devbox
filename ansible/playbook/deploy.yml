@@ -87,13 +87,15 @@
           PERCENT=50
           PRIORITY=100
         mode: '0644'
-      notify: restart zramswap
 
-    - name: Enable and start zramswap
+    # Restart explicito y no un handler, por lo mismo que Caddy: los handlers
+    # corren al final del play, asi que zram se quedaba con el default del
+    # paquete (256 MB, lz4) en vez del 50% de la RAM con zstd.
+    - name: Enable zramswap and load the config
       systemd:
         name: zramswap
         enabled: yes
-        state: started
+        state: restarted
 
     # =========================================================================
     # 3. XFCE minimo (sin goodies, sin snapd)
@@ -679,7 +681,3 @@
         state: restarted
       when: not devbox_marker.stat.exists
 
-    - name: restart zramswap
-      systemd:
-        name: zramswap
-        state: restarted
