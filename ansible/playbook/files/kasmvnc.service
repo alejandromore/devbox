@@ -1,0 +1,25 @@
+# Gestionado por Ansible - no editar a mano
+[Unit]
+Description=KasmVNC persistent desktop session (devbox)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User={{ devbox_user }}
+Group={{ devbox_user }}
+WorkingDirectory=/home/{{ devbox_user }}
+PAMName=login
+Environment=HOME=/home/{{ devbox_user }}
+Environment=SHELL=/bin/bash
+PIDFile=/home/{{ devbox_user }}/.vnc/%H:1.pid
+
+ExecStartPre=-/usr/bin/vncserver -kill {{ kasmvnc_display }}
+ExecStart=/usr/bin/vncserver {{ kasmvnc_display }} -depth 24 -geometry 1920x1080 -select-de xfce -disableBasicAuth=false -websocketPort 6901 -interface 127.0.0.1
+ExecStop=/usr/bin/vncserver -kill {{ kasmvnc_display }}
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

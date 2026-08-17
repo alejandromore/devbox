@@ -1,0 +1,24 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+override.tf
+override.tf.json
+
+# Llaves y secretos
+*.pem
+*.key
+Credentials.txt
+ecs_private_key.txt
+set-env.ps1
+
+# Ansible
+*.retry
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+*.swp

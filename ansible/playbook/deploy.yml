@@ -1,0 +1,603 @@
+- hosts: devbox
+  become: true
+
+  vars_files:
+    - vars/tools.yml
+
+  vars:
+    devbox_user: devbox
+    kasmvnc_display: ":1"
+    acme_email: "alejandromore@gmail.com"
+
+  tasks:
+
+    # =========================================================================
+    # 1. Cloud-init y zona horaria
+    # =========================================================================
+    - name: Wait for cloud-init to finish
+      command: cloud-init status --wait
+      changed_when: false
+
+    - name: Set timezone to America/Lima
+      timezone:
+        name: America/Lima
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - apt-transport-https
+          - software-properties-common
+        state: present
+
+    - name: Ensure apt keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    # =========================================================================
+    # 2. Usuario devbox + zram
+    # =========================================================================
+    - name: Create devbox user
+      user:
+        name: "{{ devbox_user }}"
+        shell: /bin/bash
+        groups: sudo
+        append: yes
+        create_home: yes
+        state: present
+
+    - name: Allow devbox to sudo without password
+      copy:
+        dest: /etc/sudoers.d/90-devbox
+        content: "{{ devbox_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Install zram-tools
+      apt:
+        name: zram-tools
+        state: present
+
+    - name: Configure zram (50% de la RAM, zstd)
+      copy:
+        dest: /etc/default/zramswap
+        content: |
+          # Gestionado por Ansible
+          ALGO=zstd
+          PERCENT=50
+          PRIORITY=100
+        mode: '0644'
+      notify: restart zramswap
+
+    - name: Enable and start zramswap
+      systemd:
+        name: zramswap
+        enabled: yes
+        state: started
+
+    # =========================================================================
+    # 3. XFCE minimo (sin goodies, sin snapd)
+    # =========================================================================
+    - name: Remove snapd
+      apt:
+        name: snapd
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
+    - name: Block snapd from being reinstalled
+      copy:
+        dest: /etc/apt/preferences.d/nosnap.pref
+        content: |
+          Package: snapd
+          Pin: release a=*
+          Pin-Priority: -10
+        mode: '0644'
+
+    - name: Install minimal XFCE desktop
+      apt:
+        name:
+          - xfce4
+          - xfce4-terminal
+          - dbus-x11
+          - xfonts-base
+          - fonts-dejavu-core
+          - x11-xserver-utils
+          - xdg-utils
+        state: present
+        install_recommends: no
+
+    - name: Ensure XFCE goodies are not installed
+      apt:
+        name:
+          - xfce4-goodies
+          - xscreensaver
+          - light-locker
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
+    # =========================================================================
+    # 4. KasmVNC (127.0.0.1:6901, sesion persistente vía systemd)
+    # =========================================================================
+    - name: Download KasmVNC package
+      get_url:
+        url: "{{ kasmvnc_deb_url }}"
+        dest: /tmp/kasmvncserver.deb
+        mode: '0644'
+
+    - name: Install KasmVNC
+      apt:
+        deb: /tmp/kasmvncserver.deb
+        state: present
+
+    - name: Add devbox user to ssl-cert group (requerido por KasmVNC)
+      user:
+        name: "{{ devbox_user }}"
+        groups: ssl-cert
+        append: yes
+
+    - name: Create KasmVNC config directory
+      file:
+        path: /etc/kasmvnc
+        state: directory
+        mode: '0755'
+
+    - name: Deploy kasmvnc.yaml
+      template:
+        src: files/kasmvnc.yaml
+        dest: /etc/kasmvnc/kasmvnc.yaml
+        mode: '0644'
+      notify: restart kasmvnc
+
+    - name: Create .vnc directory for devbox
+      file:
+        path: "/home/{{ devbox_user }}/.vnc"
+        state: directory
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0755'
+
+    - name: Set xstartup to XFCE
+      copy:
+        dest: "/home/{{ devbox_user }}/.vnc/xstartup"
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/sh
+          # Gestionado por Ansible
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          export XDG_CURRENT_DESKTOP=XFCE
+          exec dbus-launch --exit-with-session startxfce4
+
+    - name: Set devbox web password (KasmVNC basic auth)
+      shell: |
+        set -o pipefail
+        printf '%s\n%s\n' "{{ devbox_web_pass }}" "{{ devbox_web_pass }}" | \
+          kasmvncpasswd -u "{{ devbox_user }}" -w -o "/home/{{ devbox_user }}/.kasmpasswd"
+      args:
+        executable: /bin/bash
+      become_user: "{{ devbox_user }}"
+      no_log: true
+      changed_when: true
+
+    - name: Secure .kasmpasswd permissions
+      file:
+        path: "/home/{{ devbox_user }}/.kasmpasswd"
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0600'
+
+    - name: Deploy kasmvnc systemd unit
+      template:
+        src: files/kasmvnc.service
+        dest: /etc/systemd/system/kasmvnc.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart kasmvnc
+
+    - name: Enable and start kasmvnc
+      systemd:
+        name: kasmvnc
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    # =========================================================================
+    # 5. Caddy (TLS Let's Encrypt + proxy inverso al 6901)
+    # =========================================================================
+    - name: Add Caddy GPG key
+      get_url:
+        url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+        dest: /etc/apt/keyrings/caddy-stable.asc
+        mode: '0644'
+
+    - name: Add Caddy repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/caddy-stable.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+        filename: caddy-stable
+        state: present
+
+    - name: Install Caddy
+      apt:
+        name: caddy
+        state: present
+        update_cache: yes
+
+    - name: Create Caddy log directory
+      file:
+        path: /var/log/caddy
+        state: directory
+        owner: caddy
+        group: caddy
+        mode: '0755'
+
+    - name: Deploy Caddyfile
+      template:
+        src: files/Caddyfile
+        dest: /etc/caddy/Caddyfile
+        mode: '0644'
+        validate: 'caddy validate --adapter caddyfile --config %s'
+      notify: restart caddy
+
+    - name: Enable and start Caddy
+      systemd:
+        name: caddy
+        enabled: yes
+        state: started
+
+    # =========================================================================
+    # 6. fail2ban sobre el login
+    # =========================================================================
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Deploy fail2ban filter for the devbox web login
+      copy:
+        dest: /etc/fail2ban/filter.d/devbox-web.conf
+        mode: '0644'
+        content: |
+          # Gestionado por Ansible
+          # Coincide con los 401 que devuelve el login del escritorio web
+          [Definition]
+          failregex = ^.*"remote_ip":"<HOST>".*"status":401.*$
+          ignoreregex =
+      notify: restart fail2ban
+
+    - name: Deploy fail2ban jails
+      copy:
+        dest: /etc/fail2ban/jail.d/devbox.local
+        mode: '0644'
+        content: |
+          # Gestionado por Ansible
+          [sshd]
+          enabled  = true
+          maxretry = 5
+          bantime  = 1h
+          findtime = 10m
+
+          [devbox-web]
+          enabled  = true
+          port     = http,https
+          filter   = devbox-web
+          logpath  = /var/log/caddy/devbox-access.log
+          maxretry = 5
+          bantime  = 1h
+          findtime = 10m
+      notify: restart fail2ban
+
+    - name: Enable and start fail2ban
+      systemd:
+        name: fail2ban
+        enabled: yes
+        state: started
+
+    # =========================================================================
+    # 7. Herramientas (vars/tools.yml)
+    # =========================================================================
+    - name: Install base apt tools
+      apt:
+        name: "{{ apt_tools }}"
+        state: present
+
+    # --- Node.js LTS ---
+    - name: Add NodeSource GPG key
+      get_url:
+        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        dest: /etc/apt/keyrings/nodesource.asc
+        mode: '0644'
+
+    - name: Add NodeSource repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_{{ nodejs_major_version }}.x nodistro main"
+        filename: nodesource
+        state: present
+
+    - name: Install Node.js LTS
+      apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+
+    # --- Terraform ---
+    - name: Add HashiCorp GPG key
+      get_url:
+        url: https://apt.releases.hashicorp.com/gpg
+        dest: /etc/apt/keyrings/hashicorp.asc
+        mode: '0644'
+      when: install_terraform | bool
+
+    - name: Add HashiCorp repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/hashicorp.asc] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+        filename: hashicorp
+        state: present
+      when: install_terraform | bool
+
+    - name: Install Terraform
+      apt:
+        name: terraform
+        state: present
+        update_cache: yes
+      when: install_terraform | bool
+
+    # --- kubectl ---
+    - name: Add Kubernetes GPG key
+      shell: |
+        set -o pipefail
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | \
+          gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes.gpg
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/keyrings/kubernetes.gpg
+      when: install_kubectl | bool
+
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+        filename: kubernetes
+        state: present
+      when: install_kubectl | bool
+
+    - name: Install kubectl
+      apt:
+        name: kubectl
+        state: present
+        update_cache: yes
+      when: install_kubectl | bool
+
+    # --- Helm ---
+    - name: Add Helm GPG key
+      shell: |
+        set -o pipefail
+        curl -fsSL https://baltocdn.com/helm/signing.asc | \
+          gpg --dearmor --yes -o /etc/apt/keyrings/helm.gpg
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/keyrings/helm.gpg
+      when: install_helm | bool
+
+    - name: Add Helm repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main"
+        filename: helm-stable-debian
+        state: present
+      when: install_helm | bool
+
+    - name: Install Helm
+      apt:
+        name: helm
+        state: present
+        update_cache: yes
+      when: install_helm | bool
+
+    # --- Ansible ---
+    - name: Install Ansible
+      apt:
+        name: ansible
+        state: present
+      when: install_ansible | bool
+
+    # --- Podman ---
+    - name: Install Podman
+      apt:
+        name:
+          - podman
+          - podman-compose
+        state: present
+      when: install_podman | bool
+
+    # --- hcloud (KooCLI) ---
+    - name: Install KooCLI (hcloud)
+      shell: |
+        set -o pipefail
+        curl -fsSL "{{ koocli_url }}" -o /tmp/koocli.tar.gz
+        tar -xzf /tmp/koocli.tar.gz -C /tmp
+        install -m 0755 /tmp/hcloud /usr/local/bin/hcloud
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/hcloud
+      when: install_koocli | bool
+
+    # --- Visual Studio Code ---
+    - name: Add Microsoft GPG key
+      shell: |
+        set -o pipefail
+        curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | \
+          gpg --dearmor --yes -o /etc/apt/keyrings/microsoft.gpg
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/keyrings/microsoft.gpg
+      when: install_vscode | bool
+
+    - name: Add VS Code repository
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main"
+        filename: vscode
+        state: present
+      when: install_vscode | bool
+
+    - name: Install Visual Studio Code
+      apt:
+        name: code
+        state: present
+        update_cache: yes
+      when: install_vscode | bool
+
+    # --- Google Chrome ---
+    - name: Download Google Chrome package
+      get_url:
+        url: https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        dest: /tmp/google-chrome.deb
+        mode: '0644'
+      when: install_chrome | bool
+
+    - name: Install Google Chrome
+      apt:
+        deb: /tmp/google-chrome.deb
+        state: present
+      when: install_chrome | bool
+
+    # --- Claude Code CLI ---
+    - name: Install Claude Code CLI
+      npm:
+        name: "@anthropic-ai/claude-code"
+        global: yes
+        state: present
+      when: install_claude_code | bool
+
+    # --- goose ---
+    - name: Install goose
+      shell: |
+        set -o pipefail
+        curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | \
+          CONFIGURE=false bash
+      args:
+        executable: /bin/bash
+        creates: "/home/{{ devbox_user }}/.local/bin/goose"
+      become_user: "{{ devbox_user }}"
+      environment:
+        HOME: "/home/{{ devbox_user }}"
+      when: install_goose | bool
+
+    # --- Antigravity (tolerante a fallo: si no resuelve, avisa y sigue) ---
+    - name: Install Antigravity (best effort)
+      block:
+
+        - name: Download Antigravity package
+          get_url:
+            url: "{{ antigravity_deb_url }}"
+            dest: /tmp/antigravity.deb
+            mode: '0644'
+            timeout: 60
+
+        - name: Install Antigravity package
+          apt:
+            deb: /tmp/antigravity.deb
+            state: present
+
+        - name: Antigravity instalado
+          debug:
+            msg: "Antigravity instalado correctamente."
+
+      rescue:
+
+        - name: Antigravity no disponible
+          debug:
+            msg: >-
+              AVISO: Antigravity no se pudo instalar automaticamente
+              (descarga o paquete no disponible). El playbook sigue.
+              Instalalo a mano desde el Chrome del escritorio.
+
+      when: install_antigravity | bool
+
+    # =========================================================================
+    # 8. Verificacion final
+    # =========================================================================
+    - name: Flush handlers before verification
+      meta: flush_handlers
+
+    - name: Check services are running
+      command: "systemctl is-active {{ item }}"
+      register: svc_status
+      changed_when: false
+      failed_when: svc_status.stdout.strip() != 'active'
+      loop:
+        - kasmvnc
+        - caddy
+        - fail2ban
+        - zramswap
+
+    - name: Check KasmVNC is listening on 127.0.0.1:6901
+      wait_for:
+        host: 127.0.0.1
+        port: 6901
+        timeout: 60
+
+    - name: Wait for Let's Encrypt certificate to be issued
+      find:
+        paths: /var/lib/caddy/.local/share/caddy/certificates
+        patterns: "{{ devbox_domain }}.crt"
+        recurse: yes
+      register: cert_found
+      until: cert_found.matched | int > 0
+      retries: 20
+      delay: 15
+
+    - name: Check the desktop answers over HTTPS
+      uri:
+        url: "https://{{ devbox_domain }}/"
+        status_code: [200, 401]
+        validate_certs: yes
+      register: https_check
+      until: https_check.status in [200, 401]
+      retries: 10
+      delay: 10
+
+    - name: Deployment summary
+      debug:
+        msg:
+          - "Escritorio listo en https://{{ devbox_domain }}"
+          - "Usuario: {{ devbox_user }}"
+          - "Certificado emitido: si"
+          - "Servicios activos: kasmvnc, caddy, fail2ban, zramswap"
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart kasmvnc
+      systemd:
+        name: kasmvnc
+        state: restarted
+
+    - name: restart caddy
+      systemd:
+        name: caddy
+        state: restarted
+
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: restart zramswap
+      systemd:
+        name: zramswap
+        state: restarted

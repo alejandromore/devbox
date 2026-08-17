@@ -1,0 +1,23 @@
+# Gestionado por Ansible - no editar a mano
+{
+    email {{ acme_email }}
+}
+
+{{ devbox_domain }} {
+    encode zstd gzip
+
+    # KasmVNC escucha solo en loopback; Caddy es el unico expuesto a Internet
+    reverse_proxy 127.0.0.1:6901 {
+        header_up X-Real-IP {remote_host}
+        # Sesiones VNC largas: sin timeout de lectura/escritura
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+
+    log {
+        output file /var/log/caddy/devbox-access.log
+        format json
+    }
+}

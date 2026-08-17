@@ -1,0 +1,45 @@
+# Gestionado por Ansible - no editar a mano
+# KasmVNC escucha solo en loopback: el TLS y la exposicion publica los hace Caddy.
+
+desktop:
+  resolution:
+    width: 1920
+    height: 1080
+  allow_resize: true
+  pixel_depth: 24
+
+network:
+  interface: 127.0.0.1
+  websocket_port: 6901
+  use_ipv4: true
+  use_ipv6: false
+  ssl:
+    require_ssl: false
+  udp:
+    public_ip: auto
+    port: auto
+    stun_server: auto
+
+user_session:
+  new_session_disconnects_existing_exclusive_session: true
+  concurrent_connections_prompt: false
+  session_type: shared
+
+keyboard:
+  remap_keys:
+  ignore_numlock: false
+  raw_keyboard: false
+
+runtime_configuration:
+  allow_client_to_override_kasm_server_settings: true
+  allow_override_standard_vnc_server_settings: true
+
+logging:
+  log_writer_name: all
+  log_dest: logfile
+  level: 30
+
+data_loss_prevention:
+  clipboard:
+    allow_client_to_server: true
+    allow_server_to_client: true
