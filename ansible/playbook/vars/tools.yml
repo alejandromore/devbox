@@ -34,6 +34,9 @@ install_podman: true
 
 koocli_url: "https://ap-southeast-1-hwcloudcli.obs.ap-southeast-1.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz"
 
+helm_version: "v3.16.3"
+helm_url: "https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz"
+
 # Editor / navegador
 install_vscode: true
 install_chrome: true

@@ -413,28 +413,18 @@
       when: install_kubectl | bool
 
     # --- Helm ---
-    - name: Add Helm GPG key
+    # Desde el tarball oficial y no desde el repo apt de baltocdn.com: ese host
+    # sirve una cadena de certificados que el ECS no valida y curl corta con
+    # "unable to get local issuer certificate".
+    - name: Install Helm
       shell: |
         set -o pipefail
-        curl -fsSL https://baltocdn.com/helm/signing.asc | \
-          gpg --dearmor --yes -o /etc/apt/keyrings/helm.gpg
+        curl -fsSL "{{ helm_url }}" -o /tmp/helm.tar.gz
+        tar -xzf /tmp/helm.tar.gz -C /tmp
+        install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
       args:
         executable: /bin/bash
-        creates: /etc/apt/keyrings/helm.gpg
-      when: install_helm | bool
-
-    - name: Add Helm repository
-      apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main"
-        filename: helm-stable-debian
-        state: present
-      when: install_helm | bool
-
-    - name: Install Helm
-      apt:
-        name: helm
-        state: present
-        update_cache: yes
+        creates: /usr/local/bin/helm
       when: install_helm | bool
 
     # --- Ansible ---
