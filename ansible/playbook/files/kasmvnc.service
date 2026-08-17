@@ -9,7 +9,8 @@ Type=forking
 User={{ devbox_user }}
 Group={{ devbox_user }}
 WorkingDirectory=/home/{{ devbox_user }}
-PAMName=login
+# Sin PAMName=login: con la sesion PAM de por medio vncserver sale con status 29
+# y systemd nunca ve el proceso. La sesion VNC no la necesita.
 Environment=HOME=/home/{{ devbox_user }}
 Environment=SHELL=/bin/bash
 PIDFile=/home/{{ devbox_user }}/.vnc/%H:1.pid

@@ -15,8 +15,10 @@ import http.server
 import os
 import pathlib
 import shutil
+import socket
 import subprocess
 import threading
+import time
 import urllib.parse
 
 DEVBOX_USER = os.environ.get("DEVBOX_USER", "devbox")
@@ -107,8 +109,25 @@ def run(cmd, **kwargs):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
 
 
+def wait_for_desktop(timeout=90):
+    """Espera a que KasmVNC acepte conexiones en 6901."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket() as probe:
+            probe.settimeout(2)
+            if probe.connect_ex(("127.0.0.1", 6901)) == 0:
+                return True
+        time.sleep(2)
+    return False
+
+
 def set_password(password):
-    """Guarda la contrasena y deja el escritorio servido por Caddy."""
+    """Guarda la contrasena y deja el escritorio servido por Caddy.
+
+    Caddy se reapunta al escritorio recien cuando KasmVNC contesta: si se
+    reapunta antes y la sesion no levanta, la pagina de alta queda inalcanzable
+    y el sitio responde 502 sin forma de reintentar desde el navegador.
+    """
     run(
         [
             "runuser", "-u", DEVBOX_USER, "--",
@@ -122,11 +141,18 @@ def set_password(password):
 
     run(["systemctl", "enable", "--now", "kasmvnc"])
 
-    UPSTREAM_CONF.write_text(DESKTOP_UPSTREAM)
-    run(["systemctl", "reload", "caddy"])
+    if not wait_for_desktop():
+        raise RuntimeError(
+            "KasmVNC no llego a escuchar en 6901. Revisa "
+            "'journalctl -u kasmvnc' en el ECS. La contrasena quedo guardada; "
+            "esta pagina sigue disponible para reintentar."
+        )
 
     MARKER.parent.mkdir(parents=True, exist_ok=True)
     MARKER.touch()
+
+    UPSTREAM_CONF.write_text(DESKTOP_UPSTREAM)
+    run(["systemctl", "reload", "caddy"])
 
 
 def shutdown_self():
@@ -188,6 +214,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             set_password(password)
         except subprocess.CalledProcessError as exc:
             self._form(f"No se pudo aplicar: {exc.stderr or exc}".strip(), 500)
+            return
+        except RuntimeError as exc:
+            self._form(str(exc), 500)
             return
 
         self._send(DONE.format(style=STYLE, user=DEVBOX_USER))

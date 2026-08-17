@@ -39,7 +39,6 @@ logging:
   log_dest: logfile
   level: 30
 
-data_loss_prevention:
-  clipboard:
-    allow_client_to_server: true
-    allow_server_to_client: true
+# Sin bloque data_loss_prevention: las claves clipboard.allow_* no existen en
+# KasmVNC y vncserver corta con "Unsupported config keys found" en vez de
+# arrancar. El portapapeles va en los dos sentidos por defecto.
