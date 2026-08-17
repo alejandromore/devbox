@@ -1,7 +1,7 @@
 terraform {
   backend "s3" {
     region                      = "us-east-1"
-    bucket                      = "obs-alejandro-terraform-tfstate"
+    bucket                      = "obs-terraform-tfstate"
     key                         = "devbox.tfstate"
     endpoints                   = {
         s3 = "https://obs.la-south-2.myhuaweicloud.com"

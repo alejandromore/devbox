@@ -110,11 +110,12 @@ variable "instance_flavor_memory_size" {
 }
 
 variable "keypair_name" {
-  type = string
+  description = "Nombre del Key Pair a crear en KPS"
+  type        = string
 }
 
 variable "private_key_name" {
-  description = "Nombre de la llave privada para el ECS"
+  description = "Nombre del secreto en CSMS donde se guarda la llave privada del ECS"
   type        = string
 }
 

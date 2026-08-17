@@ -1,8 +1,10 @@
 @Library('shared-lib') _
 
 pipeline {
-    //agent { label 'agent-huawei' }
-    agent any
+    // El controlador solo tiene git y python3. terraform y ansible viven en el
+    // agente que provisiona el Docker cloud con esta etiqueta
+    // (swr-jenkins-alejandro/jenkins-agent-huawei).
+    agent { label 'agent-huawei' }
 
     options {
         disableConcurrentBuilds()
@@ -47,6 +49,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
+                sh 'git config --global http.version HTTP/1.1 || true'
                 checkout scm
             }
         }
@@ -72,8 +75,14 @@ pipeline {
                         )
 
                         if (params.ACTION == 'deploy') {
-                            echo "IP pública del ECS: ${env.ecs_public_ip}"
-                            echo "Registrá el A record ${params.DEVBOX_DOMAIN} -> ${env.ecs_public_ip} antes del build con RUN_ANSIBLE=true"
+                            def ip = readFile("${WORKSPACE}/ecs_public_ip.txt").trim()
+                            echo "============================================================"
+                            echo "INFRAESTRUCTURA LISTA"
+                            echo "ECS: ${ip}"
+                            echo "Registrar el A record ${params.DEVBOX_DOMAIN} -> ${ip}"
+                            echo "Recien cuando el dominio resuelva, relanzar con"
+                            echo "RUN_TERRAFORM=false y RUN_ANSIBLE=true."
+                            echo "============================================================"
                         }
                     }
                 }
@@ -91,44 +100,48 @@ pipeline {
 
             steps {
                 script {
+                    def ecsPublicIpInput = params.ECS_PUBLIC_IP?.trim()
+                    def ecsPublicIp = ecsPublicIpInput ? ecsPublicIpInput : readFile("${WORKSPACE}/ecs_public_ip.txt").trim()
 
-                    env.ecs_public_ip = params.ECS_PUBLIC_IP
-                    env.ecs_private_key = "${WORKSPACE}/ecs_private_key.txt"
+                    // Permite pegar solo la IP o una URL completa; Ansible necesita solo el host/IP.
+                    ecsPublicIp = ecsPublicIp.replaceFirst('^https?://', '').replaceFirst('/.*$', '').trim()
 
-                    //writeFile(
-                    //    file: env.ecs_private_key,
-                    //    text: new String(params.ECS_PRIVATE_KEY.decodeBase64())
-                    //)
+                    env.ECS_PUBLIC_IP_VALUE  = ecsPublicIp
+                    env.ECS_PRIVATE_KEY_FILE = "${WORKSPACE}/ecs_private_key.txt"
+                    env.DEVBOX_DOMAIN_VALUE  = params.DEVBOX_DOMAIN.trim()
+
+                    if (!fileExists(env.ECS_PRIVATE_KEY_FILE)) {
+                        error("Falta ecs_private_key.txt en el workspace: correr antes el paso 1 (RUN_TERRAFORM=true).")
+                    }
                 }
+
                 // Ejecutar el playbook de instalacion
                 dir(env.ANS_DIR) {
-
                     withCredentials([
-                        usernamePassword(credentialsId: 'github-creds', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN'),
-                        string(credentialsId: 'hwc-access-key', variable: 'HWC_ACCESS_KEY'),
-                        string(credentialsId: 'hwc-secret-key', variable: 'HWC_SECRET_KEY'),
                         string(credentialsId: 'devbox-web-pass', variable: 'DEVBOX_WEB_PASS')
                     ]) {
-
-                        sh """
+                        sh '''
                             set -e
-                            chmod 600 ${env.ecs_private_key}
-
-                            # Deshabilitar host key checking
+                            chmod 600 "$ECS_PRIVATE_KEY_FILE"
                             export ANSIBLE_HOST_KEY_CHECKING=False
 
-                            # Ejecutar playbook con todas las credenciales
-                            ansible-playbook -i inventory/hosts playbook/deploy.yml \\
-                                --private-key ${env.ecs_private_key} \\
-                                --extra-vars "ansible_host=${env.ecs_public_ip} \\
-                                            devbox_domain=${params.DEVBOX_DOMAIN} \\
-                                            devbox_web_pass=${DEVBOX_WEB_PASS} \\
-                                            github_user=${GITHUB_USER} \\
-                                            github_token=${GITHUB_TOKEN} \\
-                                            hwc_access_key=${HWC_ACCESS_KEY} \\
-                                            hwc_secret_key=${HWC_SECRET_KEY}"
+                            # La contrasena del escritorio va en un archivo 600, no en
+                            # --extra-vars: la linea de comandos es visible en `ps` para
+                            # cualquier proceso del agente.
+                            VARS_FILE=$(mktemp)
+                            chmod 600 "$VARS_FILE"
+                            trap 'rm -f "$VARS_FILE"' EXIT
 
-                        """
+                            cat > "$VARS_FILE" <<EOF
+ansible_host: "$ECS_PUBLIC_IP_VALUE"
+devbox_domain: "$DEVBOX_DOMAIN_VALUE"
+devbox_web_pass: "$DEVBOX_WEB_PASS"
+EOF
+
+                            ansible-playbook -i inventory/hosts playbook/deploy.yml \
+                                --private-key "$ECS_PRIVATE_KEY_FILE" \
+                                --extra-vars "@$VARS_FILE"
+                        '''
                     }
                 }
             }

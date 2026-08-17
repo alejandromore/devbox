@@ -32,6 +32,27 @@ resource "huaweicloud_networking_secgroup_rule" "ecs_egress_internet" {
 }
 
 #######################################
+# Key Pair (KPS) + llave privada en CSMS
+#######################################
+# La llave se genera acá, no se reusa una existente: el devbox se crea de cero.
+resource "tls_private_key" "devbox_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "huaweicloud_kps_keypair" "devbox_key" {
+  name       = var.keypair_name
+  public_key = tls_private_key.devbox_key.public_key_openssh
+}
+
+resource "huaweicloud_csms_secret" "devbox_key" {
+  name                  = var.private_key_name
+  description           = "Llave privada SSH del ECS ${var.instance_name}"
+  secret_text           = tls_private_key.devbox_key.private_key_pem
+  enterprise_project_id = data.huaweicloud_enterprise_project.ep.id
+}
+
+#######################################
 # ECS Module
 #######################################
 data "huaweicloud_images_images" "ubuntu_latest" {
@@ -48,7 +69,7 @@ module "ecs_service" {
   instance_flavor_cpu_core_count      = var.instance_flavor_cpu_core_count
   instance_flavor_memory_size         = var.instance_flavor_memory_size
   instance_image_id                   = data.huaweicloud_images_images.ubuntu_latest.images[0].id
-  instance_key_pair                   = var.keypair_name
+  instance_key_pair                   = huaweicloud_kps_keypair.devbox_key.name
 
   instance_security_group_ids         = [module.vpc_service.security_group_id]
 

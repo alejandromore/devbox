@@ -11,7 +11,8 @@ XFCE + KasmVNC detrás de Caddy con TLS de Let's Encrypt.
 ## Estructura
 
 ```
-terraform/    VPC + ECS + EIP (backend S3 sobre OBS, key devbox.tfstate)
+terraform/    VPC + ECS + EIP + keypair (backend S3 sobre OBS,
+              bucket obs-terraform-tfstate, key devbox.tfstate)
 ansible/      playbook del escritorio y las herramientas
 Jenkinsfile   pipeline de 2 etapas: Terraform y Ansible
 ```
@@ -24,7 +25,8 @@ no resuelve a la IP**, así que el paso 4 no se puede saltar ni adelantar.
 1. **Credencial en Jenkins** — crear `devbox-web-pass` (secret text) con la
    contraseña de acceso web. Las otras (`hwc-access-key`, `hwc-secret-key`,
    `github-creds`) ya existen.
-2. **Job del pipeline** — apuntarlo a este repo, rama `main`.
+2. **Job del pipeline** — `devbox` en `https://110.238.64.8`, apuntando a este
+   repo, rama `main`, corriendo sobre el agente `agent-huawei`.
 3. **Build #1** — `ACTION=deploy`, `RUN_TERRAFORM=true`, `RUN_ANSIBLE=false`.
    Jenkins imprime la IP pública del ECS.
 4. **DNS** — registrar en Namecheap el A record `devbox` → esa IP. Esperar a que
@@ -41,8 +43,11 @@ KasmVNC escucha solo en `127.0.0.1:6901`; lo único expuesto a Internet es Caddy
 La sesión es persistente (systemd `kasmvnc.service`): cerrar la pestaña no mata
 lo que estabas haciendo.
 
-Acceso por SSH: usuario `root` (o `devbox`) con la llave privada
-`basic-project-private-key`, que sale de CSMS vía el output `ecs_private_key`.
+Acceso por SSH: usuario `root` (o `devbox`) con la llave privada del secreto
+`csms-devbox-private-key`, que sale de CSMS vía el output `ecs_private_key`.
+
+Terraform crea el par de llaves de cero: `kp-devbox` en KPS y la privada guardada
+en CSMS como `csms-devbox-private-key`. No se reusa ninguna llave existente.
 
 ## Herramientas instaladas
 

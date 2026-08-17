@@ -78,8 +78,8 @@ instance_name = "ecs-devbox"
 instance_flavor_cpu_core_count = 4
 instance_flavor_memory_size    = 8
 
-keypair_name = "basic-project-key"
-private_key_name = "basic-project-private-key"
+keypair_name = "kp-devbox"
+private_key_name = "csms-devbox-private-key"
 
 instance_disks_configuration = [
   {
