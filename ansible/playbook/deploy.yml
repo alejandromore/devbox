@@ -444,12 +444,15 @@
       when: install_podman | bool
 
     # --- hcloud (KooCLI) ---
+    # El tarball trae el binario hcloud en la raiz, igual que en el Dockerfile
+    # del agente agent-huawei.
     - name: Install KooCLI (hcloud)
       shell: |
         set -o pipefail
         curl -fsSL "{{ koocli_url }}" -o /tmp/koocli.tar.gz
-        tar -xzf /tmp/koocli.tar.gz -C /tmp
+        tar -zxf /tmp/koocli.tar.gz -C /tmp
         install -m 0755 /tmp/hcloud /usr/local/bin/hcloud
+        rm -f /tmp/koocli.tar.gz
       args:
         executable: /bin/bash
         creates: /usr/local/bin/hcloud

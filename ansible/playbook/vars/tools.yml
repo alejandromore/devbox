@@ -32,7 +32,9 @@ install_ansible: true
 install_koocli: true
 install_podman: true
 
-koocli_url: "https://ap-southeast-1-hwcloudcli.obs.ap-southeast-1.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz"
+# Mismo origen que usa el Dockerfile del agente agent-huawei. Ojo: el host de
+# ap-southeast-1 devuelve 404, el que sirve el tarball es ap-southeast-3.
+koocli_url: "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz"
 
 helm_version: "v3.16.3"
 helm_url: "https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz"
