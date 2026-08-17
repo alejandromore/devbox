@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Visual Studio Code
+Comment=Editor de codigo
+Exec=/usr/bin/code --unity-launch %F
+Icon=vscode
+Terminal=false
+StartupNotify=true
+Categories=Development;IDE;

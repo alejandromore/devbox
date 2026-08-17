@@ -10,6 +10,8 @@ apt_tools:
   - curl
   - jq
   - unzip
+  # Dialogos GTK: el lanzador de Claude Code lo usa para pedir el directorio
+  - zenity
   # Lenguajes
   - python3
   - python3-pip

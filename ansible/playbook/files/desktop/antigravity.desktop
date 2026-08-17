@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+{% if antigravity_bin.stat.exists %}
+Name=Antigravity
+Comment=Antigravity IDE
+Exec=/usr/bin/antigravity %U
+Icon=applications-development
+{% else %}
+Name=Antigravity (instalar)
+Comment=Antigravity no esta instalado: abre la pagina de descarga en Chrome
+Exec=/usr/bin/google-chrome-stable https://antigravity.google
+Icon=system-software-install
+{% endif %}
+Terminal=false
+StartupNotify=true
+Categories=Development;IDE;

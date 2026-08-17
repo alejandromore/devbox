@@ -593,6 +593,47 @@
         - antigravity_deb_url | default('') | length > 0
 
     # =========================================================================
+    # 7b. Accesos directos en el escritorio
+    # =========================================================================
+    - name: Create the Desktop directory
+      file:
+        path: "/home/{{ devbox_user }}/Desktop"
+        state: directory
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0755'
+
+    - name: Deploy the launcher scripts
+      copy:
+        src: "files/devbox-{{ item }}.sh"
+        dest: "/usr/local/bin/devbox-{{ item }}"
+        mode: '0755'
+      loop:
+        - claude
+        - goose
+
+    - name: Check whether Antigravity is installed
+      stat:
+        path: /usr/bin/antigravity
+      register: antigravity_bin
+
+    # Ejecutables y de devbox: xfdesktop no ofrece "Ejecutar" en un .desktop que
+    # no tiene el bit de ejecucion.
+    - name: Deploy the desktop launchers
+      template:
+        src: "files/desktop/{{ item }}.desktop"
+        dest: "/home/{{ devbox_user }}/Desktop/{{ item }}.desktop"
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0755'
+      loop:
+        - claude
+        - goose
+        - google-chrome
+        - code
+        - antigravity
+
+    # =========================================================================
     # 8. Verificacion final
     # =========================================================================
     - name: Flush handlers before verification

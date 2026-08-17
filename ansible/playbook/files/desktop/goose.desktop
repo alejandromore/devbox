@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=goose
+Comment=Sesion de goose en una terminal
+Exec=/usr/local/bin/devbox-goose
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;Utility;
