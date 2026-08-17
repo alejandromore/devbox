@@ -612,6 +612,24 @@
         - claude
         - goose
 
+    # Sin esto el default de text/plain queda en vim.desktop, y un doble clic en
+    # un .txt desde Thunar intenta abrir un editor de consola.
+    - name: Query the current handler for plain text
+      command: xdg-mime query default text/plain
+      become_user: "{{ devbox_user }}"
+      environment:
+        HOME: "/home/{{ devbox_user }}"
+      register: mime_default
+      changed_when: false
+      failed_when: false
+
+    - name: Set mousepad as the default plain text editor
+      command: xdg-mime default org.xfce.mousepad.desktop text/plain
+      become_user: "{{ devbox_user }}"
+      environment:
+        HOME: "/home/{{ devbox_user }}"
+      when: "'mousepad' not in mime_default.stdout"
+
     - name: Check whether Antigravity is installed
       stat:
         path: /usr/bin/antigravity

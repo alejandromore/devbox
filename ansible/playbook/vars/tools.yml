@@ -16,6 +16,9 @@ apt_tools:
   - python3
   - python3-pip
   - python3-venv
+  # Editor de texto grafico liviano. XFCE se instala con --no-install-recommends
+  # y mousepad viene como recomendado, asi que hay que pedirlo explicitamente.
+  - mousepad
   # Escritorio / seguridad (el resto lo instalan tareas dedicadas)
   - fail2ban
 
