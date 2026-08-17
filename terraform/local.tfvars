@@ -1,17 +1,42 @@
-# ============================================================================
-# VARIABLES GENERALES
-# ============================================================================
-region                           = "la-south-2"
-environment                      = "local"
-enterprise_project_name          = "default"
-devbox_domain                    = "devbox.alejandromore.lat"
+region  = "la-south-2"
+app_env = "devbox"
 
-tags                             = {
-    environment = "local"
-    project     = "devbox"
-    owner       = "alejandro"
-    costcenter  = "it-001"
+enterprise_project_name = "default"
+devbox_domain           = "devbox.alejandromore.lat"
+
+tags = {
+  environment = "dev"
+  project     = "devbox"
+  owner       = "terraform"
 }
+
+# ============================================
+# NETWORKING
+# ============================================
+
+vpc_cidr       = "10.4.0.0/16"
+subnet_cidr    = "10.4.32.0/19"
+subnet_gateway = "10.4.32.1"
+
+dns_list = [
+  "100.125.1.250",
+  "100.125.21.250"
+]
+
+# ============================================
+# BANDWIDTH / EIP
+# ============================================
+
+bandwidth_size = 5 # Mbps
+
+# ============================================
+# ECS
+# ============================================
+
+ecs_cpu        = 4
+ecs_memory     = 8
+ecs_image_name = "Ubuntu 24.04 server 64bit"
+ecs_sys_disk   = 100
 
 cloud_init_config = <<-EOF
   #cloud-config
@@ -20,91 +45,19 @@ cloud_init_config = <<-EOF
     - [ timedatectl, set-timezone, America/Lima ]
 EOF
 
-# ============================================================================
-# VARIABLES PARA LA VPC
-# ============================================================================
-vpc_name = "vpc-devbox"
-vpc_cidr = "10.4.0.0/16"
+# ============================================
+# ACCESS / SECURITY
+# ============================================
 
-subnets_configuration = [
-  {
-    name = "subnet-devbox"
-    cidr = "10.4.32.0/19"
-    dns_list = ["100.125.1.250", "100.125.21.250"]
-  }
-]
+allowed_ssh_cidr = "0.0.0.0/0" # Restringir a tu IP: "X.X.X.X/32"
 
-security_group_name = "sg-devbox"
-security_group_description = "Created by terraform module"
+# 80 y 443 tienen que quedar abiertos a Internet: Let's Encrypt valida el
+# dominio desde sus propios servidores.
+allowed_https_cidr = "0.0.0.0/0"
 
-security_group_rules_configuration = [
-  {
-    description      = "Internet -> ECS (22 SSH)"
-    direction        = "ingress"
-    ethertype        = "IPv4"
-    protocol         = "tcp"
-    ports            = "22"
-    remote_ip_prefix = "0.0.0.0/0"
-    action           = "allow"
-    priority         = 1
-  },
-  {
-    description      = "Internet -> ECS (80 HTTP, ACME challenge)"
-    direction        = "ingress"
-    ethertype        = "IPv4"
-    protocol         = "tcp"
-    ports            = "80"
-    remote_ip_prefix = "0.0.0.0/0"
-    action           = "allow"
-    priority         = 1
-  },
-  {
-    description      = "Internet -> ECS (443 HTTPS, escritorio web)"
-    direction        = "ingress"
-    ethertype        = "IPv4"
-    protocol         = "tcp"
-    ports            = "443"
-    remote_ip_prefix = "0.0.0.0/0"
-    action           = "allow"
-    priority         = 1
-  }
-]
+# ============================================
+# BACKEND (Terraform state)
+# ============================================
 
-# ============================================================================
-# VARIABLES PARA EL ECS
-# ============================================================================
-instance_name = "ecs-devbox"
-
-instance_flavor_cpu_core_count = 4
-instance_flavor_memory_size    = 8
-
-keypair_name = "kp-devbox"
-private_key_name = "csms-devbox-private-key"
-
-instance_disks_configuration = [
-  {
-    is_system_disk = true
-    type           = "SSD"
-    size           = 100
-  }
-]
-
-# ============================================================================
-# VARIABLES PARA EL ECS - EIP
-# ============================================================================
-eip_name = "eip-ecs-devbox"
-
-eip_publicip_configuration = [
-  {
-    type       = "5_bgp"
-    ip_version = "4"
-  }
-]
-
-eip_bandwidth_configuration = [
-  {
-    share_type = "PER"
-    name       = "eip-bw-ecs-devbox"
-    size       = 5
-  }
-]
+tfstate_bucket = "obs-terraform-tfstate"
+tfstate_key    = "devbox.tfstate"

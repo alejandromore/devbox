@@ -11,11 +11,20 @@ XFCE + KasmVNC detrás de Caddy con TLS de Let's Encrypt.
 ## Estructura
 
 ```
-terraform/    VPC + ECS + EIP + keypair (backend S3 sobre OBS,
-              bucket obs-terraform-tfstate, key devbox.tfstate)
-ansible/      playbook del escritorio y las herramientas
-Jenkinsfile   pipeline de 2 etapas: Terraform y Ansible
+terraform/
+  00-main.tf            data sources (EP, AZs, flavor por CPU+RAM)
+  locals.tf             naming estandar a partir de app_env
+  01-network.tf         VPC + subnet
+  02-security_groups.tf SG + reglas 22, 80, 443 y egress
+  03-components.tf      EIP (5_bgp, PER) + asociacion al ECS
+  04-compute.tf         keypair + secreto en CSMS + ECS
+  backend.tf            state en OBS: obs-terraform-tfstate/devbox.tfstate
+ansible/                playbook del escritorio y las herramientas
+Jenkinsfile             pipeline de 2 etapas: Terraform y Ansible
 ```
+
+Sin módulos: todo son recursos básicos del provider, con la misma estructura
+que `tdp-jenkins-ecs`.
 
 ## Orden de ejecución
 
@@ -88,6 +97,10 @@ terraform validate
 terraform plan -var-file="local.tfvars" -out=tfplan
 terraform apply tfplan
 ```
+
+Un detalle de la API de VPC: rechaza una regla de security group si la
+descripción trae `>` (responde `is invalid rule!`). Por eso las descripciones
+en `02-security_groups.tf` son texto plano, sin flechas.
 
 Requiere `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (backend OBS) y
 `HW_ACCESS_KEY` / `HW_SECRET_KEY` (provider) en el entorno.
