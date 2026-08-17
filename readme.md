@@ -112,9 +112,22 @@ terraform plan -var-file="local.tfvars" -out=tfplan
 terraform apply tfplan
 ```
 
-Un detalle de la API de VPC: rechaza una regla de security group si la
-descripción trae `>` (responde `is invalid rule!`). Por eso las descripciones
-en `02-security_groups.tf` son texto plano, sin flechas.
+## Detalles que costaron un build
+
+- **Reglas de security group**: la API de VPC rechaza la regla si la descripción
+  trae `>` (responde `is invalid rule!`). Por eso las de
+  `02-security_groups.tf` son texto plano, sin flechas.
+- **Log de Caddy**: el `caddy validate` de la tarea de Ansible corre como root y,
+  al provisionar el logger, crea `/var/log/caddy/devbox-access.log` con dueño
+  `root:root` y modo `0600`. Caddy corre como usuario `caddy` y después no puede
+  abrirlo, así que no arranca y nunca pide el certificado. El playbook crea el
+  archivo con el dueño correcto antes de desplegar el Caddyfile.
+- **Caddy se reinicia explícitamente**, no por handler: los handlers corren al
+  final del play, así que un fallo posterior (una herramienta que no instala)
+  dejaba a Caddy con la config del paquete, que solo escucha en `:80`.
+- **Helm y KooCLI** se bajan de sus tarballs oficiales: el repo apt de
+  `baltocdn.com` presenta una cadena que el ECS no valida, y el host de KooCLI
+  de `ap-southeast-1` devuelve 404 (el bueno es `ap-southeast-3`).
 
 Requiere `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (backend OBS) y
 `HW_ACCESS_KEY` / `HW_SECRET_KEY` (provider) en el entorno.

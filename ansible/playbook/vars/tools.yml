@@ -50,4 +50,8 @@ install_goose: true
 # el playbook avisa en el log y sigue. Se instala despues desde el Chrome
 # del escritorio.
 install_antigravity: true
-antigravity_deb_url: "https://storage.googleapis.com/antigravity-release/antigravity_current_amd64.deb"
+# Vacio a proposito: la URL que probamos daba 404 y no hay un .deb oficial
+# estable al que apuntar. Con este valor vacio el playbook avisa en el log y
+# sigue, tal como estaba previsto. Si conseguis la URL, pegala aca y se instala
+# sola en la proxima corrida.
+antigravity_deb_url: ""

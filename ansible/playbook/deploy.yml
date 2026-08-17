@@ -63,6 +63,16 @@
         mode: '0440'
         validate: 'visudo -cf %s'
 
+    # Sin esto, la primera tarea que corre con become_user: devbox lo crea con
+    # modo 0700 y Ansible avisa que puede dar problemas.
+    - name: Create the ansible tmp dir for devbox
+      file:
+        path: "/home/{{ devbox_user }}/.ansible/tmp"
+        state: directory
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0700'
+
     - name: Install zram-tools
       apt:
         name: zram-tools
@@ -226,6 +236,22 @@
         group: caddy
         mode: '0755'
 
+    # Tiene que existir y ser de caddy ANTES de desplegar el Caddyfile: el
+    # `caddy validate` de la tarea de abajo corre como root y, al provisionar el
+    # logger, crea el archivo con dueño root y modo 0600. Si eso pasa, Caddy
+    # (que corre como usuario caddy) no lo puede abrir y no arranca.
+    # touch + preserve de tiempos: crea el archivo si falta y corrige dueño y
+    # permisos si quedo mal, sin truncar lo que ya haya escrito Caddy.
+    - name: Create the access log owned by caddy
+      file:
+        path: /var/log/caddy/devbox-access.log
+        state: touch
+        owner: caddy
+        group: caddy
+        mode: '0640'
+        modification_time: preserve
+        access_time: preserve
+
     - name: Create devbox state directory
       file:
         path: /var/lib/devbox
@@ -240,7 +266,6 @@
         dest: /etc/caddy/devbox-upstream.conf
         mode: '0644'
         force: no
-      notify: restart caddy
 
     - name: Deploy Caddyfile
       template:
@@ -248,13 +273,16 @@
         dest: /etc/caddy/Caddyfile
         mode: '0644'
         validate: 'caddy validate --adapter caddyfile --config %s'
-      notify: restart caddy
 
-    - name: Enable and start Caddy
+    # Restart explicito y no un handler: los handlers corren recien al final del
+    # play, asi que cualquier fallo posterior (instalar una herramienta, por
+    # ejemplo) dejaba a Caddy corriendo todavia la config del paquete, que solo
+    # escucha en :80 y nunca pide el certificado.
+    - name: Enable Caddy and load the deployed config
       systemd:
         name: caddy
         enabled: yes
-        state: started
+        state: restarted
 
     # =========================================================================
     # 5b. Alta inicial: pide la contrasena la primera vez que entras
@@ -520,6 +548,16 @@
       when: install_goose | bool
 
     # --- Antigravity (tolerante a fallo: si no resuelve, avisa y sigue) ---
+    - name: Antigravity sin URL de descarga
+      debug:
+        msg: >-
+          Antigravity no se instala automaticamente: no hay una URL de paquete
+          estable para Linux en vars/tools.yml. Instalalo desde el Chrome del
+          escritorio, o cargala en antigravity_deb_url y volve a correr.
+      when:
+        - install_antigravity | bool
+        - antigravity_deb_url | default('') | length == 0
+
     - name: Install Antigravity (best effort)
       block:
 
@@ -548,7 +586,9 @@
               (descarga o paquete no disponible). El playbook sigue.
               Instalalo a mano desde el Chrome del escritorio.
 
-      when: install_antigravity | bool
+      when:
+        - install_antigravity | bool
+        - antigravity_deb_url | default('') | length > 0
 
     # =========================================================================
     # 8. Verificacion final
@@ -624,11 +664,6 @@
     - name: restart kasmvnc
       systemd:
         name: kasmvnc
-        state: restarted
-
-    - name: restart caddy
-      systemd:
-        name: caddy
         state: restarted
 
     - name: restart fail2ban
