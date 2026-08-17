@@ -1,0 +1,16 @@
+# Gestionado por Ansible - no editar a mano
+[Unit]
+Description=devbox first-run password setup
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devbox-setup.py
+Environment=DEVBOX_USER={{ devbox_user }}
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

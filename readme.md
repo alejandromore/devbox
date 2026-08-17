@@ -29,24 +29,38 @@ que `tdp-jenkins-ecs`.
 ## Orden de ejecución
 
 El orden importa: **Let's Encrypt no emite el certificado si el dominio todavía
-no resuelve a la IP**, así que el paso 4 no se puede saltar ni adelantar.
+no resuelve a la IP**, así que el paso 3 no se puede saltar ni adelantar.
 
-1. **Credencial en Jenkins** — crear `devbox-web-pass` (secret text) con la
-   contraseña de acceso web. Las otras (`hwc-access-key`, `hwc-secret-key`,
-   `github-creds`) ya existen.
-2. **Job del pipeline** — `devbox` en `https://110.238.64.8`, apuntando a este
-   repo, rama `main`, corriendo sobre el agente `agent-huawei`.
-3. **Build #1** — `ACTION=deploy`, `RUN_TERRAFORM=true`, `RUN_ANSIBLE=false`.
+1. **Job del pipeline** — `devbox` en `https://110.238.64.8`, apuntando a este
+   repo, rama `main`, corriendo sobre el agente `agent-huawei`. Usa las
+   credenciales que ya existen (`hwc-access-key`, `hwc-secret-key`,
+   `github-creds`); no hace falta ninguna nueva.
+2. **Build #1** — `ACTION=deploy`, `RUN_TERRAFORM=true`, `RUN_ANSIBLE=false`.
    Jenkins imprime la IP pública del ECS.
-4. **DNS** — registrar en Namecheap el A record `devbox` → esa IP. Esperar a que
+3. **DNS** — registrar en Namecheap el A record `devbox` → esa IP. Esperar a que
    resuelva (`nslookup devbox.alejandromore.lat`).
-5. **Build #2** — `ACTION=deploy`, `RUN_TERRAFORM=false`, `RUN_ANSIBLE=true`,
-   `ECS_PUBLIC_IP=<la IP del paso 3>`.
+4. **Build #2** — `ACTION=deploy`, `RUN_TERRAFORM=false`, `RUN_ANSIBLE=true`,
+   `ECS_PUBLIC_IP=<la IP del paso 2>`.
+5. **Alta** — entrar a `https://devbox.alejandromore.lat` y definir ahí la
+   contraseña del escritorio.
 
 ## Cómo entrar
 
-Navegador → `https://devbox.alejandromore.lat`
-Usuario `devbox`, contraseña la que cargaste en `devbox-web-pass`.
+Navegador → `https://devbox.alejandromore.lat`, usuario `devbox`.
+
+La contraseña no vive en Jenkins ni en este repo: la definís vos la primera vez
+que entrás. Al terminar el build #2 Caddy no apunta al escritorio sino a una
+página de alta (`devbox-setup`, en `127.0.0.1:6902`). Cuando cargás la
+contraseña ahí, el servicio la guarda en el `.kasmpasswd` del ECS, arranca
+KasmVNC, reapunta Caddy al escritorio y se deshabilita solo. De ahí en adelante
+esa URL es el escritorio.
+
+⚠️ Hacé el alta apenas termina el build: hasta que definas la contraseña, esa
+página está abierta a cualquiera que llegue al dominio. Si te preocupa la
+ventana, dejá `allowed_https_cidr` en tu IP durante el deploy y abrilo después.
+
+Para rehacer el alta: borrar `/var/lib/devbox/.password-set` en el ECS, restaurar
+`/etc/caddy/devbox-upstream.conf` al puerto 6902 y volver a correr el playbook.
 
 KasmVNC escucha solo en `127.0.0.1:6901`; lo único expuesto a Internet es Caddy.
 La sesión es persistente (systemd `kasmvnc.service`): cerrar la pestaña no mata

@@ -6,15 +6,10 @@
 {{ devbox_domain }} {
     encode zstd gzip
 
-    # KasmVNC escucha solo en loopback; Caddy es el unico expuesto a Internet
-    reverse_proxy 127.0.0.1:6901 {
-        header_up X-Real-IP {remote_host}
-        # Sesiones VNC largas: sin timeout de lectura/escritura
-        transport http {
-            read_timeout 0
-            write_timeout 0
-        }
-    }
+    # A donde va el trafico lo decide /etc/caddy/devbox-upstream.conf:
+    # arranca apuntando a la pagina de alta (6902) y devbox-setup lo reapunta
+    # al escritorio (6901) cuando definis la contrasena.
+    import /etc/caddy/devbox-upstream.conf
 
     log {
         output file /var/log/caddy/devbox-access.log

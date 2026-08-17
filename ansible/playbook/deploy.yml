@@ -182,38 +182,19 @@
           export XDG_CURRENT_DESKTOP=XFCE
           exec dbus-launch --exit-with-session startxfce4
 
-    - name: Set devbox web password (KasmVNC basic auth)
-      shell: |
-        set -o pipefail
-        printf '%s\n%s\n' "{{ devbox_web_pass }}" "{{ devbox_web_pass }}" | \
-          kasmvncpasswd -u "{{ devbox_user }}" -w -o "/home/{{ devbox_user }}/.kasmpasswd"
-      args:
-        executable: /bin/bash
-      become_user: "{{ devbox_user }}"
-      no_log: true
-      changed_when: true
-
-    - name: Secure .kasmpasswd permissions
-      file:
-        path: "/home/{{ devbox_user }}/.kasmpasswd"
-        owner: "{{ devbox_user }}"
-        group: "{{ devbox_user }}"
-        mode: '0600'
-
     - name: Deploy kasmvnc systemd unit
       template:
         src: files/kasmvnc.service
         dest: /etc/systemd/system/kasmvnc.service
         mode: '0644'
-      notify:
-        - reload systemd
-        - restart kasmvnc
+      notify: reload systemd
 
-    - name: Enable and start kasmvnc
+    # KasmVNC no arranca todavia: sin .kasmpasswd la sesion no levanta. Lo
+    # arranca devbox-setup cuando definis la contrasena en el primer ingreso.
+    - name: Enable kasmvnc (queda detenido hasta el alta)
       systemd:
         name: kasmvnc
         enabled: yes
-        state: started
         daemon_reload: yes
 
     # =========================================================================
@@ -245,6 +226,22 @@
         group: caddy
         mode: '0755'
 
+    - name: Create devbox state directory
+      file:
+        path: /var/lib/devbox
+        state: directory
+        mode: '0755'
+
+    # Tiene que existir antes del Caddyfile: el import se resuelve en el
+    # validate, y sin este archivo `caddy validate` falla.
+    - name: Deploy the initial upstream (pagina de alta)
+      copy:
+        src: files/devbox-upstream.conf
+        dest: /etc/caddy/devbox-upstream.conf
+        mode: '0644'
+        force: no
+      notify: restart caddy
+
     - name: Deploy Caddyfile
       template:
         src: files/Caddyfile
@@ -258,6 +255,40 @@
         name: caddy
         enabled: yes
         state: started
+
+    # =========================================================================
+    # 5b. Alta inicial: pide la contrasena la primera vez que entras
+    # =========================================================================
+    # Asi la contrasena del escritorio no pasa por Jenkins ni vive en el repo:
+    # se define desde el navegador y queda en el ECS.
+    - name: Check if the desktop password was already set
+      stat:
+        path: /var/lib/devbox/.password-set
+      register: devbox_marker
+
+    - name: Deploy the setup app
+      copy:
+        src: files/devbox-setup.py
+        dest: /usr/local/bin/devbox-setup.py
+        mode: '0755'
+      notify: restart devbox-setup
+
+    - name: Deploy devbox-setup systemd unit
+      template:
+        src: files/devbox-setup.service
+        dest: /etc/systemd/system/devbox-setup.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart devbox-setup
+
+    - name: Enable and start devbox-setup (solo si falta el alta)
+      systemd:
+        name: devbox-setup
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      when: not devbox_marker.stat.exists
 
     # =========================================================================
     # 6. fail2ban sobre el login
@@ -537,16 +568,19 @@
       register: svc_status
       changed_when: false
       failed_when: svc_status.stdout.strip() != 'active'
-      loop:
-        - kasmvnc
-        - caddy
-        - fail2ban
-        - zramswap
+      loop: "{{ ['caddy', 'fail2ban', 'zramswap']
+                + (['devbox-setup'] if not devbox_marker.stat.exists else ['kasmvnc']) }}"
 
-    - name: Check KasmVNC is listening on 127.0.0.1:6901
+    - name: Check kasmvnc is enabled at boot
+      command: systemctl is-enabled kasmvnc
+      register: kasm_enabled
+      changed_when: false
+      failed_when: kasm_enabled.stdout.strip() != 'enabled'
+
+    - name: Check the active upstream is listening on loopback
       wait_for:
         host: 127.0.0.1
-        port: 6901
+        port: "{{ 6902 if not devbox_marker.stat.exists else 6901 }}"
         timeout: 60
 
     - name: Wait for Let's Encrypt certificate to be issued
@@ -559,7 +593,9 @@
       retries: 20
       delay: 15
 
-    - name: Check the desktop answers over HTTPS
+    # Sin alta hecha responde 200 la pagina de alta; con el escritorio arriba,
+    # KasmVNC contesta 200 o 401 segun pida credenciales.
+    - name: Check the site answers over HTTPS
       uri:
         url: "https://{{ devbox_domain }}/"
         status_code: [200, 401]
@@ -571,11 +607,21 @@
 
     - name: Deployment summary
       debug:
-        msg:
-          - "Escritorio listo en https://{{ devbox_domain }}"
-          - "Usuario: {{ devbox_user }}"
-          - "Certificado emitido: si"
-          - "Servicios activos: kasmvnc, caddy, fail2ban, zramswap"
+        msg: >-
+          {{
+            [
+              'Entra a https://' ~ devbox_domain ~ ' y defini ahi la contrasena del escritorio.',
+              'Usuario: ' ~ devbox_user ~ '. La contrasena queda solo en el ECS.',
+              'Hacelo ahora: hasta que la definas, el que llegue primero a esa pagina la define.',
+              'Certificado emitido: si.'
+            ]
+            if not devbox_marker.stat.exists
+            else [
+              'Escritorio listo en https://' ~ devbox_domain,
+              'Usuario: ' ~ devbox_user ~ ' con la contrasena que definiste en el alta.',
+              'Certificado emitido: si.'
+            ]
+          }}
 
   handlers:
     - name: reload systemd
@@ -596,6 +642,14 @@
       systemd:
         name: fail2ban
         state: restarted
+
+    # Si ya se hizo el alta, el servicio esta deshabilitado y no hay que
+    # revivirlo: reiniciar solo cuando sigue en pie.
+    - name: restart devbox-setup
+      systemd:
+        name: devbox-setup
+        state: restarted
+      when: not devbox_marker.stat.exists
 
     - name: restart zramswap
       systemd:

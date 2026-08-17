@@ -115,34 +115,20 @@ pipeline {
                     }
                 }
 
-                // Ejecutar el playbook de instalacion
+                // Ejecutar el playbook de instalacion.
+                // Jenkins no maneja la contrasena del escritorio: la defines vos
+                // en el primer ingreso y queda guardada en el ECS.
                 dir(env.ANS_DIR) {
-                    withCredentials([
-                        string(credentialsId: 'devbox-web-pass', variable: 'DEVBOX_WEB_PASS')
-                    ]) {
-                        sh '''
-                            set -e
-                            chmod 600 "$ECS_PRIVATE_KEY_FILE"
-                            export ANSIBLE_HOST_KEY_CHECKING=False
+                    sh '''
+                        set -e
+                        chmod 600 "$ECS_PRIVATE_KEY_FILE"
+                        export ANSIBLE_HOST_KEY_CHECKING=False
 
-                            # La contrasena del escritorio va en un archivo 600, no en
-                            # --extra-vars: la linea de comandos es visible en `ps` para
-                            # cualquier proceso del agente.
-                            VARS_FILE=$(mktemp)
-                            chmod 600 "$VARS_FILE"
-                            trap 'rm -f "$VARS_FILE"' EXIT
-
-                            cat > "$VARS_FILE" <<EOF
-ansible_host: "$ECS_PUBLIC_IP_VALUE"
-devbox_domain: "$DEVBOX_DOMAIN_VALUE"
-devbox_web_pass: "$DEVBOX_WEB_PASS"
-EOF
-
-                            ansible-playbook -i inventory/hosts playbook/deploy.yml \
-                                --private-key "$ECS_PRIVATE_KEY_FILE" \
-                                --extra-vars "@$VARS_FILE"
-                        '''
-                    }
+                        ansible-playbook -i inventory/hosts playbook/deploy.yml \
+                            --private-key "$ECS_PRIVATE_KEY_FILE" \
+                            --extra-vars "ansible_host=$ECS_PUBLIC_IP_VALUE" \
+                            --extra-vars "devbox_domain=$DEVBOX_DOMAIN_VALUE"
+                    '''
                 }
             }
         }
@@ -153,7 +139,11 @@ EOF
             echo "Pipeline ejecutado correctamente (${params.ACTION})"
             script {
                 if (params.ACTION == 'deploy' && params.RUN_ANSIBLE) {
-                    echo "Escritorio disponible en https://${params.DEVBOX_DOMAIN} (usuario: devbox)"
+                    echo "============================================================"
+                    echo "Entra a https://${params.DEVBOX_DOMAIN} y defini ahi la"
+                    echo "contrasena del escritorio (usuario: devbox)."
+                    echo "Hacelo ahora: hasta que la definas, esa pagina esta abierta."
+                    echo "============================================================"
                 }
             }
         }
