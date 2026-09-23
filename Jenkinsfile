@@ -110,8 +110,25 @@ pipeline {
                     env.ECS_PRIVATE_KEY_FILE = "${WORKSPACE}/ecs_private_key.txt"
                     env.DEVBOX_DOMAIN_VALUE  = params.DEVBOX_DOMAIN.trim()
 
+                    // Workspace nuevo (job recreado, workspace limpio): la llave se
+                    // lee del state en OBS. Solo init + output, nunca un apply.
                     if (!fileExists(env.ECS_PRIVATE_KEY_FILE)) {
-                        error("Falta ecs_private_key.txt en el workspace: correr antes el paso 1 (RUN_TERRAFORM=true).")
+                        withCredentials([
+                            string(credentialsId: 'hwc-access-key', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'hwc-secret-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                        ]) {
+                            dir(env.TF_DIR) {
+                                sh '''
+                                    set -e
+                                    terraform init -input=false >/dev/null
+                                    terraform output -raw ecs_private_key > "$ECS_PRIVATE_KEY_FILE"
+                                '''
+                            }
+                        }
+                    }
+
+                    if (!readFile(env.ECS_PRIVATE_KEY_FILE).contains('PRIVATE KEY')) {
+                        error("No se pudo obtener la llave del ECS: correr antes el paso 1 (RUN_TERRAFORM=true).")
                     }
                 }
 

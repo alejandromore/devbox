@@ -1,0 +1,18 @@
+# Gestionado por Ansible - no editar a mano
+# File Browser escucha solo en loopback y sin login propio: quien lo expone en
+# /files y pide la contrasena (la misma del escritorio) es Caddy.
+[Unit]
+Description=devbox File Browser (/files)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ devbox_user }}
+Group={{ devbox_user }}
+ExecStart=/usr/local/bin/filebrowser -d {{ filebrowser_db }} -a 127.0.0.1 -p {{ filebrowser_port }} -r /home/{{ devbox_user }} -b /files
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

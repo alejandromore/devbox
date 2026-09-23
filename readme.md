@@ -31,7 +31,7 @@ que `tdp-jenkins-ecs`.
 El orden importa: **Let's Encrypt no emite el certificado si el dominio todavía
 no resuelve a la IP**, así que el paso 3 no se puede saltar ni adelantar.
 
-1. **Job del pipeline** — `devbox` en `https://110.238.64.8`, apuntando a este
+1. **Job del pipeline** — `devbox` en `https://176.52.134.168`, apuntando a este
    repo, rama `main`, corriendo sobre el agente `agent-huawei`. Usa las
    credenciales que ya existen (`hwc-access-key`, `hwc-secret-key`,
    `github-creds`); no hace falta ninguna nueva.
@@ -41,6 +41,9 @@ no resuelve a la IP**, así que el paso 3 no se puede saltar ni adelantar.
    resuelva (`nslookup devbox.alejandromore.lat`).
 4. **Build #2** — `ACTION=deploy`, `RUN_TERRAFORM=false`, `RUN_ANSIBLE=true`,
    `ECS_PUBLIC_IP=<la IP del paso 2>`.
+   Si el workspace no tiene la llave (job recreado o limpio), el stage la lee
+   del state en OBS con `terraform output`; no hace falta volver a correr
+   Terraform.
 5. **Alta** — entrar a `https://devbox.alejandromore.lat` y definir ahí la
    contraseña del escritorio.
 
@@ -66,8 +69,27 @@ KasmVNC escucha solo en `127.0.0.1:6901`; lo único expuesto a Internet es Caddy
 La sesión es persistente (systemd `kasmvnc.service`): cerrar la pestaña no mata
 lo que estabas haciendo.
 
-Acceso por SSH: usuario `root` (o `devbox`) con la llave privada del secreto
-`csms-devbox-private-key`, que sale de CSMS vía el output `ecs_private_key`.
+## Transferir archivos
+
+Navegador → `https://devbox.alejandromore.lat/files/`, mismo usuario y
+contraseña que el escritorio. Es File Browser (subir, bajar, arrastrar
+carpetas) y muestra `/home/devbox`, así que lo que subís aparece en el
+escritorio con el dueño correcto.
+
+File Browser escucha solo en `127.0.0.1:8081` y no tiene login propio: Caddy le
+pregunta a KasmVNC (`forward_auth`) si las credenciales son válidas antes de
+dejar pasar. Hasta que se hace el alta, `/files` responde 502.
+
+También por SFTP/SCP (WinSCP, FileZilla, `scp`) como `root` con la llave
+privada del secreto `csms-devbox-private-key` (output `ecs_private_key`). Lo
+que subas así queda de root: `chown -R devbox:devbox` para usarlo en el
+escritorio.
+
+## Acceso por SSH
+
+Usuario `root` con la llave privada del secreto `csms-devbox-private-key`, que
+sale de CSMS vía el output `ecs_private_key`. El usuario `devbox` no tiene la
+llave en su `authorized_keys`.
 
 Terraform crea el par de llaves de cero: `kp-devbox` en KPS y la privada guardada
 en CSMS como `csms-devbox-private-key`. No se reusa ninguna llave existente.
@@ -76,7 +98,7 @@ en CSMS como `csms-devbox-private-key`. No se reusa ninguna llave existente.
 
 | Grupo | Qué va |
 |---|---|
-| Escritorio | XFCE, KasmVNC, Caddy, fail2ban |
+| Escritorio | XFCE, KasmVNC, Caddy, fail2ban, File Browser |
 | Editor / navegador | Visual Studio Code, Google Chrome |
 | IA | Claude Code CLI, goose, Antigravity ⚠️ |
 | IaC / K8s | Terraform, kubectl, Helm, Ansible |

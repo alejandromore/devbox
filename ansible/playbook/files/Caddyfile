@@ -6,6 +6,18 @@
 {{ devbox_domain }} {
     encode zstd gzip
 
+    # Transferencia de archivos (File Browser). No tiene login propio: antes de
+    # pasar, forward_auth le pregunta a KasmVNC si las credenciales del
+    # navegador son validas, asi que vale la misma contrasena del escritorio y
+    # los 401 caen en el mismo log que vigila fail2ban. Antes del alta KasmVNC
+    # no corre y /files responde 502.
+    handle /files* {
+        forward_auth 127.0.0.1:6901 {
+            uri /
+        }
+        reverse_proxy 127.0.0.1:{{ filebrowser_port }}
+    }
+
     # A donde va el trafico lo decide /etc/caddy/devbox-upstream.conf:
     # arranca apuntando a la pagina de alta (6902) y devbox-setup lo reapunta
     # al escritorio (6901) cuando definis la contrasena.

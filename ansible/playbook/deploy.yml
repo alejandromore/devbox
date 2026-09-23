@@ -8,6 +8,9 @@
     devbox_user: devbox
     kasmvnc_display: ":1"
     acme_email: "alejandromore@gmail.com"
+    filebrowser_url: "https://github.com/filebrowser/filebrowser/releases/latest/download/linux-amd64-filebrowser.tar.gz"
+    filebrowser_port: 8081
+    filebrowser_db: /var/lib/filebrowser/filebrowser.db
 
   tasks:
 
@@ -319,6 +322,60 @@
         state: started
         daemon_reload: yes
       when: not devbox_marker.stat.exists
+
+    # =========================================================================
+    # 5c. File Browser en /files (subir y bajar archivos desde el navegador)
+    # =========================================================================
+    - name: Install File Browser
+      shell: |
+        set -o pipefail
+        curl -fsSL "{{ filebrowser_url }}" -o /tmp/filebrowser.tar.gz
+        tar -xzf /tmp/filebrowser.tar.gz -C /tmp filebrowser
+        install -m 0755 /tmp/filebrowser /usr/local/bin/filebrowser
+        rm -f /tmp/filebrowser.tar.gz /tmp/filebrowser
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/filebrowser
+
+    - name: Create the File Browser state directory
+      file:
+        path: "{{ filebrowser_db | dirname }}"
+        state: directory
+        owner: "{{ devbox_user }}"
+        group: "{{ devbox_user }}"
+        mode: '0700'
+
+    # auth.method=noauth: el login lo hace Caddy contra KasmVNC. File Browser
+    # igual exige un usuario en la base; su contrasena es aleatoria, no se usa
+    # nunca y no sale del ECS. La base vive fuera de /home/devbox para que no
+    # aparezca (ni se pueda borrar) desde el propio File Browser.
+    - name: Initialize the File Browser database
+      shell: |
+        set -e
+        filebrowser config init -d "{{ filebrowser_db }}" --auth.method=noauth
+        filebrowser users add "{{ devbox_user }}" "$(openssl rand -hex 24)" \
+          --perm.admin -d "{{ filebrowser_db }}"
+      args:
+        executable: /bin/bash
+        creates: "{{ filebrowser_db }}"
+      become_user: "{{ devbox_user }}"
+      no_log: true
+
+    - name: Deploy the File Browser systemd unit
+      template:
+        src: files/filebrowser.service
+        dest: /etc/systemd/system/filebrowser.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart filebrowser
+
+    - name: Enable and start File Browser
+      systemd:
+        name: filebrowser
+        enabled: yes
+        state: started
+        daemon_reload: yes
 
     # =========================================================================
     # 6. fail2ban sobre el login
@@ -662,7 +719,7 @@
       register: svc_status
       changed_when: false
       failed_when: svc_status.stdout.strip() != 'active'
-      loop: "{{ ['caddy', 'fail2ban', 'zramswap']
+      loop: "{{ ['caddy', 'fail2ban', 'zramswap', 'filebrowser']
                 + (['devbox-setup'] if not devbox_marker.stat.exists else ['kasmvnc']) }}"
 
     - name: Check kasmvnc is enabled at boot
@@ -676,6 +733,12 @@
         host: 127.0.0.1
         port: "{{ 6902 if not devbox_marker.stat.exists else 6901 }}"
         timeout: 60
+
+    - name: Check File Browser is listening on loopback
+      wait_for:
+        host: 127.0.0.1
+        port: "{{ filebrowser_port }}"
+        timeout: 30
 
     - name: Wait for Let's Encrypt certificate to be issued
       find:
@@ -713,6 +776,7 @@
             else [
               'Escritorio listo en https://' ~ devbox_domain,
               'Usuario: ' ~ devbox_user ~ ' con la contrasena que definiste en el alta.',
+              'Archivos: https://' ~ devbox_domain ~ '/files/ (mismo usuario y contrasena).',
               'Certificado emitido: si.'
             ]
           }}
@@ -730,6 +794,11 @@
     - name: restart fail2ban
       systemd:
         name: fail2ban
+        state: restarted
+
+    - name: restart filebrowser
+      systemd:
+        name: filebrowser
         state: restarted
 
     # Si ya se hizo el alta, el servicio esta deshabilitado y no hay que
