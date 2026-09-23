@@ -25,6 +25,25 @@
       timezone:
         name: America/Lima
 
+    # Antes del primer update: HashiCorp rota la llave con la que firma su repo
+    # (lo hizo en 2026-09) y con la llave vieja apt corta con NO_PUBKEY, asi
+    # que en un ECS ya provisionado el update de abajo fallaba antes de llegar
+    # a la seccion de Terraform. force: se baja siempre y solo marca changed si
+    # la llave cambio.
+    - name: Ensure apt keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Refresh HashiCorp GPG key
+      get_url:
+        url: https://apt.releases.hashicorp.com/gpg
+        dest: /etc/apt/keyrings/hashicorp.asc
+        mode: '0644'
+        force: yes
+      when: install_terraform | bool
+
     - name: Update apt cache
       apt:
         update_cache: yes
@@ -40,12 +59,6 @@
           - apt-transport-https
           - software-properties-common
         state: present
-
-    - name: Ensure apt keyrings directory exists
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
 
     # =========================================================================
     # 2. Usuario devbox + zram
@@ -452,14 +465,7 @@
         state: present
         update_cache: yes
 
-    # --- Terraform ---
-    - name: Add HashiCorp GPG key
-      get_url:
-        url: https://apt.releases.hashicorp.com/gpg
-        dest: /etc/apt/keyrings/hashicorp.asc
-        mode: '0644'
-      when: install_terraform | bool
-
+    # --- Terraform (la llave se refresca en el paso 1) ---
     - name: Add HashiCorp repository
       apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/hashicorp.asc] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
