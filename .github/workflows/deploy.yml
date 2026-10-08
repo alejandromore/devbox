@@ -76,17 +76,36 @@ jobs:
       - name: Terraform apply (deploy)
         if: ${{ inputs.run_terraform && inputs.action == 'deploy' }}
         working-directory: terraform
+        run: terraform apply -input=false -auto-approve -var-file=local.tfvars
+
+      # Actualiza el A record en Namecheap via Dynamic DNS con la IP nueva del
+      # ECS. Requiere que el host sea de tipo "A + Dynamic DNS Record" y el
+      # secret NAMECHEAP_DDNS_PASSWORD. Asi se elimina el paso manual de DNS.
+      - name: Configurar DNS en Namecheap (Dynamic DNS)
+        if: ${{ inputs.run_terraform && inputs.action == 'deploy' }}
+        working-directory: terraform
+        env:
+          NAMECHEAP_DDNS_PASSWORD: ${{ secrets.NAMECHEAP_DDNS_PASSWORD }}
         run: |
-          terraform apply -input=false -auto-approve -var-file=local.tfvars
+          set -euo pipefail
           ip="$(terraform output -raw ecs_public_ip)"
-          {
-            echo "## Infraestructura lista"
-            echo ""
-            echo "ECS: \`$ip\`"
-            echo ""
-            echo "1. Registra el A record \`${{ inputs.devbox_domain }}\` -> \`$ip\`"
-            echo "2. Cuando el dominio resuelva, re-ejecuta con **run_terraform=false** y **run_ansible=true**."
-          } >> "$GITHUB_STEP_SUMMARY"
+          fqdn="${{ inputs.devbox_domain }}"
+          host="${fqdn%%.*}"
+          domain="${fqdn#*.}"
+          echo "Actualizando $fqdn (host=$host, domain=$domain) -> $ip"
+          resp="$(curl -sS --get "https://dynamicdns.park-your-domain.com/update" \
+            --data-urlencode "host=$host" \
+            --data-urlencode "domain=$domain" \
+            --data-urlencode "password=$NAMECHEAP_DDNS_PASSWORD" \
+            --data-urlencode "ip=$ip")"
+          if echo "$resp" | grep -q "<ErrCount>0</ErrCount>"; then
+            echo "DNS actualizado OK: $fqdn -> $ip"
+            { echo "## Infraestructura lista"; echo ""; echo "ECS \`$fqdn\` -> \`$ip\`"; echo ""; echo "DNS configurado automaticamente en Namecheap."; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Namecheap DDNS rechazo la actualizacion. Verifica que el host '$host' sea tipo 'A + Dynamic DNS Record' y que Dynamic DNS este activo."
+            echo "Respuesta (sin password): $(echo "$resp" | tr -d '\n')"
+            exit 1
+          fi
 
       # ------------------------------------------------------------------
       # DESTROY
