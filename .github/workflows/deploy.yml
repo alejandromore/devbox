@@ -1,0 +1,138 @@
+name: Deploy devbox
+
+# Reemplaza al Jenkinsfile. Dos fases, igual que antes:
+#   Fase 1 (run_terraform): crea la infra (VPC + ECS + EIP) con Terraform.
+#   -> registras el A record devbox.alejandromore.lat -> IP del ECS.
+#   Fase 2 (run_ansible): instala el escritorio (XFCE + KasmVNC + Caddy).
+# Se dispara a mano desde la pestaña Actions (workflow_dispatch).
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Acción sobre el ambiente"
+        type: choice
+        options: [deploy, destroy]
+        default: deploy
+      run_terraform:
+        description: "Fase 1 - Infraestructura (VPC + ECS + EIP)"
+        type: boolean
+        default: false
+      run_ansible:
+        description: "Fase 2 - Escritorio (XFCE + KasmVNC + Caddy)"
+        type: boolean
+        default: false
+      devbox_domain:
+        description: "Dominio del escritorio (su A record debe apuntar al ECS antes de la Fase 2)"
+        type: string
+        default: devbox.alejandromore.lat
+
+# Equivalente a disableConcurrentBuilds(): evita dos corridas pisando el state.
+concurrency:
+  group: devbox-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_CLI_ARGS: "-no-color"
+  # El provider huaweicloud lee HW_ACCESS_KEY / HW_SECRET_KEY.
+  HW_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+  HW_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+  # El backend OBS es S3-compatible: usa las mismas llaves con nombres AWS.
+  AWS_ACCESS_KEY_ID: ${{ secrets.HW_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.HW_SECRET_KEY }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Toma los secrets del environment 'poc' que ya configuraste.
+    environment: poc
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          # Sin wrapper para que 'terraform output -raw' devuelva el valor limpio.
+          terraform_wrapper: false
+
+      # init siempre: configura el backend OBS para apply, destroy y output.
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      # ------------------------------------------------------------------
+      # FASE 1 - INFRAESTRUCTURA
+      # ------------------------------------------------------------------
+      - name: Terraform apply (deploy)
+        if: ${{ inputs.run_terraform && inputs.action == 'deploy' }}
+        working-directory: terraform
+        run: |
+          terraform apply -input=false -auto-approve -var-file=local.tfvars
+          ip="$(terraform output -raw ecs_public_ip)"
+          {
+            echo "## Infraestructura lista"
+            echo ""
+            echo "ECS: \`$ip\`"
+            echo ""
+            echo "1. Registra el A record \`${{ inputs.devbox_domain }}\` -> \`$ip\`"
+            echo "2. Cuando el dominio resuelva, re-ejecuta con **run_terraform=false** y **run_ansible=true**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ------------------------------------------------------------------
+      # DESTROY
+      # ------------------------------------------------------------------
+      - name: Terraform destroy
+        if: ${{ inputs.action == 'destroy' }}
+        working-directory: terraform
+        run: terraform destroy -input=false -auto-approve -var-file=local.tfvars
+
+      # ------------------------------------------------------------------
+      # FASE 2 - ESCRITORIO
+      # ------------------------------------------------------------------
+      - name: Obtener IP y llave SSH desde el state
+        if: ${{ inputs.run_ansible && inputs.action == 'deploy' }}
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          echo "ECS_PUBLIC_IP=$(terraform output -raw ecs_public_ip)" >> "$GITHUB_ENV"
+          # La llave sale del state (output sensible). Va directo a un archivo,
+          # nunca al log. umask 077 -> permisos restringidos desde su creación.
+          umask 077
+          terraform output -raw ecs_private_key > "$RUNNER_TEMP/ecs_key.pem"
+          chmod 600 "$RUNNER_TEMP/ecs_key.pem"
+          grep -q "PRIVATE KEY" "$RUNNER_TEMP/ecs_key.pem" \
+            || { echo "El state no tiene la llave del ECS: corre antes la Fase 1 (run_terraform=true)."; exit 1; }
+
+      - name: Setup Python + Ansible
+        if: ${{ inputs.run_ansible && inputs.action == 'deploy' }}
+        run: |
+          python3 -m pip install --upgrade pip
+          # Paquete 'ansible' completo: incluye community.general (módulo timezone).
+          python3 -m pip install "ansible>=9,<11"
+
+      - name: Ansible deploy
+        if: ${{ inputs.run_ansible && inputs.action == 'deploy' }}
+        working-directory: ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i inventory/hosts playbook/deploy.yml \
+            --private-key "$RUNNER_TEMP/ecs_key.pem" \
+            --extra-vars "ansible_host=$ECS_PUBLIC_IP" \
+            --extra-vars "devbox_domain=${{ inputs.devbox_domain }}"
+          {
+            echo "## Escritorio desplegado"
+            echo ""
+            echo "Entra a https://${{ inputs.devbox_domain }} y define ahí la contraseña"
+            echo "del escritorio (usuario: \`devbox\`) en el primer ingreso."
+          } >> "$GITHUB_STEP_SUMMARY"
