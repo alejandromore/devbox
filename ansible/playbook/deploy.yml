@@ -698,6 +698,14 @@
         path: /usr/bin/antigravity
       register: antigravity_bin
 
+    # Logo de ChatGPT para el launcher (no hay icono de tema para ChatGPT, el
+    # .desktop lo referencia por ruta absoluta).
+    - name: Deploy ChatGPT icon
+      copy:
+        src: files/desktop/icons/chatgpt.svg
+        dest: /usr/share/icons/chatgpt.svg
+        mode: '0644'
+
     # Ejecutables y de devbox: xfdesktop no ofrece "Ejecutar" en un .desktop que
     # no tiene el bit de ejecucion.
     - name: Deploy the desktop launchers
@@ -713,6 +721,7 @@
         - google-chrome
         - code
         - antigravity
+        - chatgpt
 
     # =========================================================================
     # 8. Verificacion final
@@ -792,10 +801,14 @@
       systemd:
         daemon_reload: yes
 
+    # Solo reiniciar si el alta ya se hizo. En una caja nueva sin .kasmpasswd el
+    # servicio no puede arrancar (vncserver no levanta -> systemd corta por
+    # timeout); ahi lo arranca devbox-setup tras definir la contrasena.
     - name: restart kasmvnc
       systemd:
         name: kasmvnc
         state: restarted
+      when: devbox_marker.stat.exists
 
     - name: restart fail2ban
       systemd:

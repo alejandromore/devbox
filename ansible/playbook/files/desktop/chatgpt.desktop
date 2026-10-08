@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ChatGPT
+Comment=ChatGPT en modo app (Chrome)
+Exec=/usr/bin/google-chrome-stable --app=https://chatgpt.com --class=ChatGPT
+Icon=/usr/share/icons/chatgpt.svg
+Terminal=false
+StartupNotify=true
+StartupWMClass=ChatGPT
+Categories=Network;Utility;
