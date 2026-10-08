@@ -4,6 +4,6 @@ Type=Application
 Name=goose
 Comment=Sesion de goose en una terminal
 Exec=/usr/local/bin/devbox-goose
-Icon=utilities-terminal
+Icon=/usr/share/icons/goose.png
 Terminal=false
 Categories=Development;Utility;

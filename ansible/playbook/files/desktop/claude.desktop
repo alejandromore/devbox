@@ -4,6 +4,6 @@ Type=Application
 Name=Claude Code
 Comment=Abre Claude Code en el directorio que elijas
 Exec=/usr/local/bin/devbox-claude
-Icon=utilities-terminal
+Icon=/usr/share/icons/claude.svg
 Terminal=false
 Categories=Development;Utility;
